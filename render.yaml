@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: forpuchai-mcp
+    env: python
+    buildCommand: pip install -r requirements.txt && playwright install-deps chromium && playwright install chromium
+    startCommand: python forpuchai.py
+    envVars:
+      - key: TOKEN
+        value: ddea28553198
+      - key: MY_NUMBER
+        value: 917011072161 

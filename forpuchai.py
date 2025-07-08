@@ -224,11 +224,32 @@ Extract all required information and generate the appropriate JSON response."""
 
 def scrape_student_data(url: str, identifier: str) -> Dict[str, Any]:
     """Scrape student data from IPU ranklist website"""
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(url)
-        page.wait_for_timeout(2000)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process',
+                    '--disable-gpu',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor'
+                ]
+            )
+            page = browser.new_page()
+            # Set user agent to avoid bot detection
+            page.set_extra_http_headers({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            })
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(3000)
+    except Exception as browser_error:
+        raise ValueError(f"Browser failed to start or load page. This might be due to server limitations. Error: {str(browser_error)}. Please try the URL manually: {url}")
 
         try:
             page.locator(".close-button").click(timeout=2000)
