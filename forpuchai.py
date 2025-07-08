@@ -242,97 +242,151 @@ def scrape_student_data(url: str, identifier: str) -> Dict[str, Any]:
                 ]
             )
             page = browser.new_page()
+            
             # Set user agent to avoid bot detection
             page.set_extra_http_headers({
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             })
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            page.wait_for_timeout(3000)
+            
+            # Navigate to the page with better wait strategy
+            try:
+                page.goto(url, wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(3000)
+            except Exception as e:
+                browser.close()
+                raise ValueError(f"Failed to load page {url}. Error: {str(e)}. Please check if the website is accessible.")
+
+            # Close any popup/modal if present
+            try:
+                page.locator(".close-button").click(timeout=2000)
+            except:
+                pass
+
+            # Wait for the table to load
+            try:
+                page.wait_for_selector("table", timeout=15000)
+            except:
+                browser.close()
+                raise ValueError(f"Results table did not load properly. The website might be down or the URL is incorrect: {url}")
+
+            # Find and click the student row with better error handling
+            try:
+                # Try different selector patterns to find the student
+                row_selectors = [
+                    f"table tr:has-text('{identifier}')",
+                    f"tr:has-text('{identifier}')",
+                    f"table tbody tr:has-text('{identifier}')"
+                ]
+                
+                row = None
+                for selector in row_selectors:
+                    try:
+                        row = page.locator(selector).first
+                        if row.count() > 0:
+                            break
+                    except:
+                        continue
+                
+                if not row or row.count() == 0:
+                    browser.close()
+                    raise ValueError(f"Student '{identifier}' not found in the results. Please verify the student name/enrollment number and ensure you're searching in the correct semester/batch.")
+                
+                row.scroll_into_view_if_needed()
+                page.wait_for_timeout(1000)
+                row.click(force=True)
+                page.wait_for_timeout(4000)
+                
+            except Exception as e:
+                browser.close()
+                raise ValueError(f"Student '{identifier}' not found or click failed. Error: {str(e)}")
+
+            # Wait for student details to load with better selector
+            try:
+                page.wait_for_selector("text=Enrollment Number:", timeout=10000)
+            except:
+                browser.close()
+                raise ValueError("Student detail panel did not load properly. The website might be experiencing issues.")
+
+            summary_data = {}
+
+            # Extract student summary information with improved error handling
+            try:
+                def get_value(label_text):
+                    try:
+                        element = page.locator(f"text={label_text}").first
+                        if element.count() > 0:
+                            return element.evaluate("el => el.nextSibling ? el.nextSibling.textContent.trim() : ''")
+                        return ""
+                    except:
+                        return ""
+
+                summary_data["enrollment_number"] = get_value("Enrollment Number:")
+                summary_data["name"] = get_value("Name:")
+                summary_data["marks"] = get_value("Marks:")
+                summary_data["percentage"] = get_value("Percentage:")
+
+                if page.locator("text=Credit Marks:").count() > 0:
+                    summary_data["credit_marks"] = get_value("Credit Marks:")
+                    summary_data["credit_percentage"] = get_value("Credit Percentage:")
+
+                if page.locator("text=SGPA:").count() > 0:
+                    summary_data["sgpa"] = get_value("SGPA:")
+                if page.locator("text=CGPA:").count() > 0:
+                    summary_data["cgpa"] = get_value("CGPA:")
+
+                summary_data["equivalent_percentage"] = get_value("Equivalent Percentage:")
+                summary_data["credits_obtained"] = get_value("Credits Obtained:")
+                summary_data["rank"] = get_value("Rank:")
+                
+            except Exception as e:
+                print(f"Failed to extract summary info: {str(e)}")
+
+            # Extract subject-wise marks
+            try:
+                subject_rows = page.locator("table:has-text('Subject (Credits)') tbody tr")
+                if subject_rows.count() > 0:
+                    summary_data["subjects"] = []
+                    for i in range(subject_rows.count()):
+                        try:
+                            cells = subject_rows.nth(i).locator("td")
+                            if cells.count() >= 2:
+                                subject = cells.nth(0).inner_text().strip()
+                                marks = cells.nth(1).inner_text().strip()
+                                summary_data["subjects"].append({"subject": subject, "marks": marks})
+                        except:
+                            continue
+            except Exception as e:
+                print(f"Failed to extract subject-wise marks: {str(e)}")
+
+            # Extract semester summary
+            try:
+                sem_rows = page.locator("table:has-text('Semester') tbody tr")
+                if sem_rows.count() > 0:
+                    summary_data["semesters"] = []
+                    for i in range(sem_rows.count()):
+                        try:
+                            cells = sem_rows.nth(i).locator("td")
+                            if cells.count() >= 3:
+                                semester = cells.nth(0).inner_text().strip()
+                                marks = cells.nth(1).inner_text().strip()
+                                percentage = cells.nth(2).inner_text().strip()
+                                sgpa = cells.nth(3).inner_text().strip() if cells.count() > 3 else ""
+                                summary_data["semesters"].append({
+                                    "semester": semester,
+                                    "marks": marks,
+                                    "percentage": percentage,
+                                    "sgpa": sgpa
+                                })
+                        except:
+                            continue
+            except Exception as e:
+                print(f"Failed to extract semester summary: {str(e)}")
+
+            browser.close()
+            return summary_data
+            
     except Exception as browser_error:
-        raise ValueError(f"Browser failed to start or load page. This might be due to server limitations. Error: {str(browser_error)}. Please try the URL manually: {url}")
-
-        try:
-            page.locator(".close-button").click(timeout=2000)
-        except:
-            pass
-
-        try:
-            row = page.locator(f"table tr:has-text('{identifier}')").first
-            row.scroll_into_view_if_needed()
-            page.wait_for_timeout(1000)
-            row.click(force=True)
-            page.wait_for_timeout(3000)
-        except Exception as e:
-            browser.close()
-            raise ValueError(f"Student '{identifier}' not found or click failed. Error: {str(e)}")
-
-        try:
-            page.wait_for_selector("text=Enrollment Number:", timeout=5000)
-        except:
-            browser.close()
-            raise ValueError("Student detail panel did not load properly")
-
-        summary_data = {}
-
-        try:
-            def get_value(label_text):
-                return page.locator(f"text={label_text}").first.evaluate("el => el.nextSibling.textContent").strip()
-
-            summary_data["enrollment_number"] = get_value("Enrollment Number:")
-            summary_data["name"] = get_value("Name:")
-            summary_data["marks"] = get_value("Marks:")
-            summary_data["percentage"] = get_value("Percentage:")
-
-            if page.locator("text=Credit Marks:").count() > 0:
-                summary_data["credit_marks"] = get_value("Credit Marks:")
-                summary_data["credit_percentage"] = get_value("Credit Percentage:")
-
-            if page.locator("text=SGPA:").count() > 0:
-                summary_data["sgpa"] = get_value("SGPA:")
-            if page.locator("text=CGPA:").count() > 0:
-                summary_data["cgpa"] = get_value("CGPA:")
-
-            summary_data["equivalent_percentage"] = get_value("Equivalent Percentage:")
-            summary_data["credits_obtained"] = get_value("Credits Obtained:")
-            summary_data["rank"] = get_value("Rank:")
-        except Exception as e:
-            print("Failed to extract summary info:", str(e))
-
-        try:
-            subject_rows = page.locator("table:has-text('Subject (Credits)') tbody tr")
-            if subject_rows.count() > 0:
-                summary_data["subjects"] = []
-                for i in range(subject_rows.count()):
-                    cells = subject_rows.nth(i).locator("td")
-                    if cells.count() >= 2:
-                        subject = cells.nth(0).inner_text().strip()
-                        marks = cells.nth(1).inner_text().strip()
-                        summary_data["subjects"].append({"subject": subject, "marks": marks})
-        except Exception as e:
-            print("Failed to extract subject-wise marks:", str(e))
-
-        try:
-            sem_rows = page.locator("table:has-text('Semester') tbody tr")
-            if sem_rows.count() > 0:
-                summary_data["semesters"] = []
-                for i in range(sem_rows.count()):
-                    cells = sem_rows.nth(i).locator("td")
-                    if cells.count() >= 3:
-                        semester = cells.nth(0).inner_text().strip()
-                        marks = cells.nth(1).inner_text().strip()
-                        percentage = cells.nth(2).inner_text().strip()
-                        sgpa = cells.nth(3).inner_text().strip() if cells.count() > 3 else ""
-                        summary_data["semesters"].append({
-                            "semester": semester,
-                            "marks": marks,
-                            "percentage": percentage,
-                            "sgpa": sgpa
-                        })
-        except Exception as e:
-            print("Failed to extract semester summary:", str(e))
-
-        browser.close()
-        return summary_data
+        raise ValueError(f"Browser failed to start or critical error occurred. This might be due to server limitations or website issues. Error: {str(browser_error)}. Please try the URL manually: {url}")
 
 # FIXED: Updated tool description to be clearer about the 2-step process
 IPUDirectScrapingDescription = RichToolDescription(
