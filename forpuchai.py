@@ -364,10 +364,11 @@ async def validate() -> str:
     return MY_NUMBER
 
 async def main():
+    port = int(os.environ.get("PORT", 8085))
     await mcp.run_async(
         "streamable-http",
         host="0.0.0.0",
-        port=8085,
+        port=port,
     )
 
 if __name__ == "__main__":
